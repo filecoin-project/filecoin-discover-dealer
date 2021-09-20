@@ -71,7 +71,7 @@ FIL_CURRENT_DRAND_B64="$(
 )"
 FIL_AUTHSIG="$(
   printf '{ "jsonrpc": "2.0", "id":1, "method": "Filecoin.WalletSign", "params": [ "%s", "%s" ] }' "$FIL_FINALIZED_WORKER_ID" "${B64_SPACEPAD}${FIL_CURRENT_DRAND_B64}" \
-    | lotus_apicall | "$BIN_jq" -rc '[.result.Type,.result.Data ] | join(";")'
+    | lotus_apicall | "$BIN_jq" -rc '[(.result.Type|tostring),.result.Data ] | join(";")'
 )"
 
 printf '%s %d;%s;%s\n' "$FIL_AUTHHDR" "$FIL_CURRENT_EPOCH" "$FIL_SP" "$FIL_AUTHSIG"
