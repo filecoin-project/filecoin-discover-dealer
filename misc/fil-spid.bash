@@ -40,7 +40,11 @@ FULLNODE_API_INFO="${FULLNODE_API_INFO:-$( "$BIN_cat" "$LOTUS_PATH/token" ):/ip4
 
 # derive token + maddr, then host/port
 IFS=':' read -r API_TOKEN API_MADDR <<<"$FULLNODE_API_INFO"
-IFS='/' read -r IGNORE IGNORE API_HOST API_TPROTO API_PORT API_APROTO <<<"$API_MADDR"
+IFS='/' read -r IGNORE API_NPROTO API_HOST API_TPROTO API_PORT API_APROTO <<<"$API_MADDR"
+
+if [[ "$API_NPROTO" == "ip6" ]]; then
+  API_HOST="\[$API_HOST\]"
+fi
 
 lotus_apicall() {
   local input="$( "$BIN_cat" )"
@@ -67,7 +71,7 @@ FIL_CURRENT_DRAND_B64="$(
 )"
 FIL_AUTHSIG="$(
   printf '{ "jsonrpc": "2.0", "id":1, "method": "Filecoin.WalletSign", "params": [ "%s", "%s" ] }' "$FIL_FINALIZED_WORKER_ID" "${B64_SPACEPAD}${FIL_CURRENT_DRAND_B64}" \
-    | lotus_apicall | "$BIN_jq" -rc '[.result.Type,.result.Data ] | join(";")'
+    | lotus_apicall | "$BIN_jq" -rc '[(.result.Type|tostring),.result.Data ] | join(";")'
 )"
 
 printf '%s %d;%s;%s\n' "$FIL_AUTHHDR" "$FIL_CURRENT_EPOCH" "$FIL_SP" "$FIL_AUTHSIG"
