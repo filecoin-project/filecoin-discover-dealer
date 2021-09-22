@@ -56,7 +56,7 @@ lotus_apicall() {
 
 B64_SPACEPAD="ICAg"  # use this to pefix the random beacon, lest it becomes valid CBOR
 FIL_GENESIS_UNIX="1598306400"
-FIL_CURRENT_EPOCH="$(( ( $EPOCHSECONDS - $FIL_GENESIS_UNIX ) / 30  ))"
+FIL_CURRENT_EPOCH="$(( ( $( printf "%(%s)T" -1 ) - $FIL_GENESIS_UNIX ) / 30  ))"
 FIL_FINALIZED_TIPSET="$(
   printf '{ "jsonrpc": "2.0", "id":1, "method": "Filecoin.ChainGetTipSetByHeight", "params": [ %d, null ] }' "$(( "$FIL_CURRENT_EPOCH" - 900 ))" \
     | lotus_apicall | "$BIN_jq" -rc .result.Cids
