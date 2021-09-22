@@ -3,7 +3,7 @@
 #
 # Filecoin StorageProvider ID ( fil-spid.bash )
 #
-# A simple system for stateless miner authentication, using a custom
+# A simple system for stateless StorageProvider authentication, using a custom
 # `Authorization: FIL-SPID ...` HTTP header. Full spec: TODO
 #
 # Typical usage:
@@ -15,7 +15,7 @@
 # - Determine the supplied storage-provider's Worker address at finality
 # - Get the drand signature for current epoch ( now )
 # - Sign the string "\x20\x20\x20{DrandSignature}" using the determined worker key
-# - Print the result formatted correctly to be included in an HTTP hader
+# - Print the result to be used directly as an HTTP Authorization header
 #
 
 set -eu
