@@ -1,0 +1,14 @@
+#
+# Server response HTTP code <!--# echo var="status" default="000" -->
+#
+# Note - this service is only available to self-authenticated storage poviders.
+# To do so you must use an authenticator with Lotus API access to your SP Worker key.
+#
+# The entire authenticator is a single script with its only dependencies being cat, curl and jq
+# https://github.com/filecoin-project/filecoin-discover-dealer/blob/master/misc/fil-spid.bash
+#
+# Use it like:
+#   curl -sL -H "Authorization: $( ./fil-spid.bash f0XXXX )" 'https://filecoin-discover.web3.storage/...'
+#
+
+exit 1;
