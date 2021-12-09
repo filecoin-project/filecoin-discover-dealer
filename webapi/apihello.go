@@ -12,11 +12,11 @@ func apiHello(c echo.Context) error {
 	p := c.QueryParams()
 	slackHandle := p.Get("filslack")
 	if len(slackHandle) < 3 || len(slackHandle) > 128 {
-		return reqFail(c, `You must provide your filecoin-slack handle as a 'filslack' parameter when introducing yourself: .../hello?filslack=YOURSLACKHANDLE`)
+		return httpFail(c, nil, `You must provide your filecoin-slack handle as a 'filslack' parameter when introducing yourself: .../hello?filslack=YOURSLACKHANDLE`)
 	} else if slackHandle == "YOURSLACKHANDLE" {
-		return reqFail(c, `You must provide your *actual* filecoin-slack @name as a 'filslack' parameter when introducing yourself: .../hello?filslack=YOURSLACKHANDLE`)
+		return httpFail(c, nil, `You must provide your *actual* filecoin-slack @name as a 'filslack' parameter when introducing yourself: .../hello?filslack=YOURSLACKHANDLE`)
 	} else if slackHandle[0:2] == "U0" {
-		return reqFail(c, `You must provide your *actual* filecoin-slack @name when introducing yourself, not the U0… numeric id: .../hello?filslack=YOURSLACKHANDLE`)
+		return httpFail(c, nil, `You must provide your *actual* filecoin-slack @name when introducing yourself, not the U0… numeric id: .../hello?filslack=YOURSLACKHANDLE`)
 	}
 
 	jstr, _ := json.Marshal(slackHandle)
@@ -26,12 +26,12 @@ func apiHello(c echo.Context) error {
 	if _, err := ddcommon.Db.Exec(
 		c.Request().Context(),
 		`
-		INSERT INTO discover.providers ( provider, details ) VALUES ( $1, $2 )
+		INSERT INTO discover.providers ( provider, meta ) VALUES ( $1, $2 )
 			ON CONFLICT ( provider ) DO UPDATE SET
-				details = JSONB_SET(
-					providers.details,
+				meta = JSONB_SET(
+					providers.meta,
 					'{ filslack }',
-					( providers.details->'filslack' ) || ( EXCLUDED.details->'filslack' ),
+					( providers.meta->'filslack' ) || ( EXCLUDED.meta->'filslack' ),
 					TRUE
 				)
 		`,
@@ -41,7 +41,7 @@ func apiHello(c echo.Context) error {
 		return err
 	}
 
-	return reqOk(
+	return httpOk(
 		c,
 		"Well, hello there `%s`, you have been associated with storage provider %s!",
 		slackHandle,

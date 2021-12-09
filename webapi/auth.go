@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
-	"time"
 
 	ddcommon "github.com/filecoin-project/filecoin-discover-dealer/ddcommon"
 	filaddr "github.com/filecoin-project/go-address"
@@ -50,7 +52,7 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		challenge.authHdr = c.Request().Header.Get(echo.HeaderAuthorization)
 		res := authRe.FindStringSubmatch(challenge.authHdr)
 		if len(res) != 5 {
-			return authFail(c, "invalid/unexpected FIL-SPID Authorization header '%s'", challenge.authHdr)
+			return httpAuthFail(c, "invalid/unexpected FIL-SPID Authorization header '%s'", challenge.authHdr)
 		}
 
 		var err error
@@ -58,20 +60,20 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 
 		challenge.spID, err = filaddr.NewFromString(challenge.hdr.spid)
 		if err != nil {
-			return authFail(c, "unexpected FIL-SPID auth address '%s'", challenge.hdr.spid)
+			return httpAuthFail(c, "unexpected FIL-SPID auth address '%s'", challenge.hdr.spid)
 		}
 
 		challenge.epoch, err = strconv.ParseInt(challenge.hdr.epoch, 10, 32)
 		if err != nil {
-			return authFail(c, "unexpected FIL-SPID auth epoch '%s'", challenge.hdr.epoch)
+			return httpAuthFail(c, "unexpected FIL-SPID auth epoch '%s'", challenge.hdr.epoch)
 		}
 
-		curFilEpoch := (time.Now().Unix() - int64(ddcommon.FilGenesisUnix)) / 30
+		curFilEpoch := int64(ddcommon.WallTimeEpoch())
 		if curFilEpoch < challenge.epoch {
-			return authFail(c, "FIL-SPID auth epoch '%d' is in the future", challenge.epoch)
+			return httpAuthFail(c, "FIL-SPID auth epoch '%d' is in the future", challenge.epoch)
 		}
 		if curFilEpoch-challenge.epoch > sigGraceEpochs {
-			return authFail(c, "FIL-SPID auth epoch '%d' is too far in the past", challenge.epoch)
+			return httpAuthFail(c, "FIL-SPID auth epoch '%d' is too far in the past", challenge.epoch)
 		}
 
 		var authErr string
@@ -86,7 +88,60 @@ func spidAuth(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 
 		if authErr != "" {
-			return authFail(c, authErr)
+			return httpAuthFail(c, authErr)
+		}
+
+		if c.Request().URL.Path != "/hello" {
+
+			var spRegistered bool
+
+			if err := ddcommon.Db.QueryRow(
+				c.Request().Context(),
+				`SELECT EXISTS ( SELECT 42 FROM providers WHERE provider = $1 AND meta->'filslack' IS NOT NULL )`,
+				challenge.spID.String(),
+			).Scan(&spRegistered); err != nil {
+				return err
+			}
+
+			if !spRegistered {
+				return httpAuthFail(
+					c,
+					"You must first associate your storage provider with a Filecoin Slack handle\n"+
+						"Please invoke https://filecoin-discover.web3.storage/hello?filslack=YOURSLACKHANDLE",
+				)
+			}
+
+			req := c.Request()
+			reqJ, err := json.Marshal(
+				struct {
+					Method  string
+					URL     *url.URL
+					Headers http.Header
+				}{
+					Method:  req.Method,
+					URL:     req.URL,
+					Headers: req.Header,
+				},
+			)
+			if err != nil {
+				return err
+			}
+
+			var requestUUID string
+			if err := ddcommon.Db.QueryRow(
+				c.Request().Context(),
+				`
+				INSERT INTO requests ( provider, request_dump )
+					VALUES ( $1, $2 )
+				RETURNING request_uuid
+				`,
+				challenge.spID.String(),
+				reqJ,
+			).Scan(&requestUUID); err != nil {
+				return err
+			}
+
+			c.Response().Header().Set("X-REQUEST-UUID", requestUUID)
 		}
 
 		c.Response().Header().Set("X-FIL-SPID", challenge.spID.String())

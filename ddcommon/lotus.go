@@ -1,15 +1,19 @@
 package ddcommon
 
 import (
+	"context"
+	"fmt"
 	"time"
 
+	"github.com/dgraph-io/ristretto"
+	filaddr "github.com/filecoin-project/go-address"
+	"github.com/filecoin-project/go-state-types/abi"
 	filabi "github.com/filecoin-project/go-state-types/abi"
-	lotusapi "github.com/filecoin-project/lotus/api"
 	filbuild "github.com/filecoin-project/lotus/build"
+	filactor "github.com/filecoin-project/lotus/chain/actors/builtin"
 	filtypes "github.com/filecoin-project/lotus/chain/types"
 	filactors "github.com/filecoin-project/specs-actors/actors/builtin"
 	"github.com/ipfs/go-cid"
-	"github.com/urfave/cli/v2"
 	"golang.org/x/xerrors"
 )
 
@@ -25,8 +29,12 @@ func CidV1(c cid.Cid) cid.Cid {
 
 func MainnetTime(e filabi.ChainEpoch) time.Time { return time.Unix(int64(e)*30+FilGenesisUnix, 0) }
 
-func LotusLookbackTipset(cctx *cli.Context, api *lotusapi.FullNodeStruct) (*filtypes.TipSet, error) {
-	latestHead, err := api.ChainHead(cctx.Context)
+func WallTimeEpoch() filabi.ChainEpoch {
+	return abi.ChainEpoch(time.Now().Unix()-FilGenesisUnix) / filactor.EpochDurationSeconds
+}
+
+func LotusLookbackTipset(ctx context.Context) (*filtypes.TipSet, error) {
+	latestHead, err := LotusAPI.ChainHead(ctx)
 	if err != nil {
 		return nil, xerrors.Errorf("failed getting chain head: %w", err)
 	}
@@ -50,10 +58,66 @@ func LotusLookbackTipset(cctx *cli.Context, api *lotusapi.FullNodeStruct) (*filt
 
 	latestHeight := latestHead.Height()
 
-	tipsetAtLookback, err := api.ChainGetTipSetByHeight(cctx.Context, latestHeight-filabi.ChainEpoch(cctx.Uint("lotus-lookback-epochs")), latestHead.Key())
+	tipsetAtLookback, err := LotusAPI.ChainGetTipSetByHeight(ctx, latestHeight-filabi.ChainEpoch(lotusLookbackEpochs), latestHead.Key())
 	if err != nil {
-		return nil, xerrors.Errorf("determining target tipset %d epochs ago failed: %w", cctx.Uint("lotus-lookback-epochs"), err)
+		return nil, xerrors.Errorf("determining target tipset %d epochs ago failed: %w", lotusLookbackEpochs, err)
 	}
 
 	return tipsetAtLookback, nil
+}
+
+var providerEligibleCache, _ = ristretto.NewCache(&ristretto.Config{
+	NumCounters: 1e7, BufferItems: 64,
+	MaxCost: 1024,
+	Cost:    func(interface{}) int64 { return 1 },
+})
+
+func SpChainIneligibleReason(ctx context.Context, sp filaddr.Address) (defIneligibleReason string, defErr error) {
+
+	defer func() {
+		if defErr != nil {
+			providerEligibleCache.Del(sp.String())
+			defIneligibleReason = ""
+		} else {
+			providerEligibleCache.SetWithTTL(sp.String(), defIneligibleReason, 1, 5*time.Minute)
+		}
+	}()
+
+	if protoReason, found := providerEligibleCache.Get(sp.String()); found {
+		return protoReason.(string), nil
+	}
+
+	curTipset, err := LotusLookbackTipset(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	mbi, err := LotusAPI.MinerGetBaseInfo(ctx, sp, curTipset.Height(), curTipset.Key())
+	if err != nil {
+		return "", err
+	}
+	if mbi == nil || !mbi.EligibleForMining {
+		return "MBI-ineligible", nil
+	}
+
+	ydayTipset, err := LotusAPI.ChainGetTipSetByHeight(
+		ctx,
+		curTipset.Height()-filactors.EpochsInDay+1, // X-2880+1
+		filtypes.TipSetKey{},
+	)
+	if err != nil {
+		return "", err
+	}
+
+	for _, ts := range []*filtypes.TipSet{curTipset, ydayTipset} {
+		curMF, err := LotusAPI.StateMinerFaults(ctx, sp, ts.Key())
+		if err != nil {
+			return "", err
+		}
+		if fc, _ := curMF.Count(); fc != 0 {
+			return fmt.Sprintf("%d faults at epoch %d", fc, ts.Height()), nil
+		}
+	}
+
+	return "", nil
 }

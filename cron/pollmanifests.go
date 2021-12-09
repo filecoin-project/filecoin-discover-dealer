@@ -38,6 +38,8 @@ type carInfo struct {
 	HardFails []string
 }
 
+var serNoMatch = regexp.MustCompile(`[-_]ST.+?[-_]([A-Za-z0-9]+)$`)
+
 var pollManifests = &cli.Command{
 	Usage: "Poll newly uploaded drive mainfests",
 	Name:  "poll-manifests",
@@ -120,6 +122,27 @@ var pollManifests = &cli.Command{
 		}
 		total += int64(len(toProcess))
 
+		rows, err = ddcommon.Db.Query(
+			ctx,
+			`SELECT drive_serno FROM discover.drives`,
+		)
+		if err != nil {
+			return err
+		}
+		knownDrives := make(map[string]struct{}, 2048)
+		for rows.Next() {
+			var serNo string
+			if err = rows.Scan(&serNo); err != nil {
+				return err
+			}
+			knownDrives[serNo] = struct{}{}
+		}
+		if err = rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+
+		driveRows := make([][]interface{}, 0)
 		manifestRows := make([][]interface{}, 0)
 		manifestEntryRows := make([][]interface{}, 0)
 
@@ -137,18 +160,34 @@ var pollManifests = &cli.Command{
 				return err
 			}
 
+			driveIDJs, err := json.Marshal(ms.DriveIdentifier)
+			if err != nil {
+				return err
+			}
+
+			var serNo *string
+			if sm := serNoMatch.FindStringSubmatch(ms.DriveIdentifier); len(sm) == 2 {
+				serNo = &sm[1]
+
+				if _, known := knownDrives[*serNo]; !known {
+					driveRows = append(driveRows, []interface{}{serNo})
+					knownDrives[*serNo] = struct{}{}
+				}
+			}
+
 			manifestRows = append(manifestRows, []interface{}{
 				mID,
-				ms.DriveIdentifier,
+				serNo,
 				ms.ValidationStart,
 				s3obj.LastModified,
+				[]byte(fmt.Sprintf(`{ "drive_id" : %s }`, driveIDJs)),
 			})
 
 			for cidStr, car := range ms.Carfiles {
 
 				em := struct {
-					ValidSize   bool     `json:"valid_size"`
-					ValidHeader bool     `json:"valid_header"`
+					ValidSize   bool     `json:"valid_size,omitempty"`
+					ValidHeader bool     `json:"valid_header,omitempty"`
 					ValidCommP  bool     `json:"valid_commp,omitempty"`
 					Size        int      `json:"size,omitempty"`
 					Failures    []string `json:"failures,omitempty"`
@@ -181,8 +220,18 @@ var pollManifests = &cli.Command{
 
 		_, err = tx.CopyFrom(
 			ctx,
+			pgx.Identifier{"discover", "drives"},
+			[]string{"drive_serno"},
+			pgx.CopyFromRows(driveRows),
+		)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.CopyFrom(
+			ctx,
 			pgx.Identifier{"discover", "manifests"},
-			[]string{"manifest_id", "drive_id", "validated_at", "uploaded_at"},
+			[]string{"manifest_id", "drive_serno", "validated_at", "uploaded_at", "meta"},
 			pgx.CopyFromRows(manifestRows),
 		)
 		if err != nil {

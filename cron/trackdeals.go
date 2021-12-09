@@ -9,6 +9,7 @@ import (
 	"github.com/filecoin-project/filecoin-discover-dealer/ddcommon"
 	filaddr "github.com/filecoin-project/go-address"
 	filabi "github.com/filecoin-project/go-state-types/abi"
+	filbig "github.com/filecoin-project/go-state-types/big"
 	lotusapi "github.com/filecoin-project/lotus/api"
 	filprovider "github.com/filecoin-project/lotus/chain/actors/builtin/miner"
 	filtypes "github.com/filecoin-project/lotus/chain/types"
@@ -31,7 +32,8 @@ var trackDeals = &cli.Command{
 
 			defer close(dealsQueried)
 
-			stateTipset, err := ddcommon.LotusLookbackTipset(cctx, ddcommon.LotusAPI)
+			var err error
+			stateTipset, err = ddcommon.LotusLookbackTipset(ctx)
 			if err != nil {
 				dealsQueried <- err
 				return
@@ -47,6 +49,37 @@ var trackDeals = &cli.Command{
 			log.Infof("retrieved %s state deal records", humanize.Comma(int64(len(stateDeals))))
 		}()
 
+		knownClients := make(map[filaddr.Address]*filbig.Int)
+		rows, err := ddcommon.Db.Query(
+			ctx,
+			`SELECT client FROM clients`,
+		)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var c string
+			if err = rows.Scan(&c); err != nil {
+				return err
+			}
+			cAddr, err := filaddr.NewFromString(c)
+			if err != nil {
+				return err
+			}
+
+			dcap, err := ddcommon.LotusAPI.StateVerifiedClientStatus(ctx, cAddr, stateTipset.Key())
+			if err != nil {
+				return err
+			}
+			knownClients[cAddr] = dcap
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+
+		log.Infof("queried datacap for %d clients", len(knownClients))
+
 		knownPieces := make(map[cid.Cid]struct{}, 5_000_000)
 
 		type filDeal struct {
@@ -55,7 +88,7 @@ var trackDeals = &cli.Command{
 		}
 		knownDeals := make(map[int64]filDeal)
 
-		rows, err := ddcommon.Db.Query(
+		rows, err = ddcommon.Db.Query(
 			ctx,
 			`
 			SELECT c.piece_cid, d.deal_id, d.status
@@ -213,8 +246,6 @@ var trackDeals = &cli.Command{
 				statusMeta = &m
 			}
 
-			log.Debugw("x", statusMeta, sectorStart)
-
 			dealTotals[status]++
 			if initialEncounter {
 				if status == "terminated" {
@@ -224,7 +255,14 @@ var trackDeals = &cli.Command{
 				}
 			}
 
-			_, err = ddcommon.Db.Exec(
+			if d.Proposal.VerifiedDeal && status == "published" {
+				if dcap, knownClient := knownClients[clientLookup[d.Proposal.Client]]; knownClient {
+					filbig.Add(*dcap, filbig.NewInt(int64(d.Proposal.PieceSize)))
+				}
+			}
+
+			var lastStatus *string
+			err = ddcommon.Db.QueryRow(
 				ctx,
 				`
 				INSERT INTO discover.published_deals
@@ -234,6 +272,14 @@ var trackDeals = &cli.Command{
 					status = EXCLUDED.status,
 					status_meta = EXCLUDED.status_meta,
 					sector_start_epoch = COALESCE( EXCLUDED.sector_start_epoch, discover.published_deals.sector_start_epoch )
+				RETURNING
+					-- this select sees the table as it was before the upsert
+					(
+						SELECT status
+							FROM discover.published_deals resel
+						WHERE
+							resel.deal_id = published_deals.deal_id
+					)
 				`,
 				dealID,
 				d.Proposal.PieceCID.String(),
@@ -246,9 +292,37 @@ var trackDeals = &cli.Command{
 				status,
 				statusMeta,
 				sectorStart,
-			)
+			).Scan(&lastStatus)
 			if err != nil {
 				return err
+			}
+
+			if d.Proposal.VerifiedDeal && status == "active" && (lastStatus == nil || *lastStatus != "active") {
+				if _, err := ddcommon.Db.Exec(
+					ctx,
+					`
+					UPDATE discover.proposals
+						SET active_deal_id = $1
+					WHERE
+						proposal_failure = ''
+							AND
+						proposal_success_cid IS NOT NULL
+							AND
+						active_deal_id IS NULL
+							AND
+						piece_cid = $2
+							AND
+						provider = $3
+							AND
+						client = $4
+					`,
+					dealID,
+					d.Proposal.PieceCID.String(),
+					d.Proposal.Provider.String(),
+					clientLookup[d.Proposal.Client].String(),
+				); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -279,6 +353,27 @@ var trackDeals = &cli.Command{
 				toFail,
 			)
 			if err != nil {
+				return err
+			}
+		}
+
+		for c, d := range knownClients {
+			var di *int64
+			if d != nil {
+				v := d.Int64()
+				di = &v
+			}
+			if _, err = ddcommon.Db.Exec(
+				ctx,
+				`
+				UPDATE discover.clients SET
+					non_activated_datacap = $1
+				WHERE
+					client = $2
+				`,
+				di,
+				c.String(),
+			); err != nil {
 				return err
 			}
 		}

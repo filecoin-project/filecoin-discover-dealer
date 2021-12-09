@@ -67,7 +67,8 @@ func main() {
 			}
 
 			if currentCmd != "track-deals" &&
-				currentCmd != "poll-manifests" {
+				currentCmd != "poll-manifests" &&
+				currentCmd != "propose-pending" {
 				log.Warn("push of prometheus metrics temp-disabled")
 				return
 			}
@@ -98,12 +99,12 @@ func main() {
 			}
 
 			log.Error(err)
-			if currentCmdLock != nil || currentCmd == "get-new-dags" {
+			if currentCmdLock != nil {
 				emitEndLogs(false)
 			}
 			cleanup()
 			os.Exit(1)
-		} else if currentCmdLock != nil || currentCmd == "get-new-dags" {
+		} else if currentCmdLock != nil {
 			emitEndLogs(true)
 		}
 	}()
@@ -117,6 +118,7 @@ func main() {
 			pollManifests,
 			trackDeals,
 			pushPrometheusMetrics,
+			proposePending,
 		},
 		Flags: ddcommon.CliFlags,
 		// obtains locks and emits the proper init loglines
@@ -150,8 +152,8 @@ func main() {
 					firstCmdOccurrence = cmdNames[os.Args[i]]
 				}
 
-				// wrong cmd or something
-				if firstCmdOccurrence == "" {
+				// help, wrong cmd or something
+				if firstCmdOccurrence == "" || firstCmdOccurrence == "help" {
 					return nil
 				}
 

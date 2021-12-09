@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"os"
 
 	"github.com/filecoin-project/filecoin-discover-dealer/ddcommon"
@@ -19,7 +18,22 @@ func main() {
 
 	e.GET("/hello", apiHello)
 	e.POST("/hello", apiHello)
-	e.Any("*", func(c echo.Context) error { return c.NoContent(http.StatusForbidden) })
+
+	e.GET("/proposals/for", apiProposalsRequest)
+	e.GET("/proposals/for/:manifestID", apiProposalsRequest)
+
+	e.GET("/proposals/listpending", apiProposalsList)
+
+	e.GET("/stats", apiStats)
+
+	e.Any("*", func(c echo.Context) error {
+		return httpFail(
+			c,
+			nil,
+			"there is nothing at %s",
+			c.Request().RequestURI,
+		)
+	})
 
 	e.Logger.SetLevel(lslog.INFO)
 	e.Use(middleware.Logger())

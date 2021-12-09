@@ -28,13 +28,18 @@ BEGIN
 END;
 $$;
 
+CREATE TABLE IF NOT EXISTS discover.clients (
+  entry_id SERIAL UNIQUE NOT NULL CONSTRAINT valid_client_id CHECK ( SUBSTRING( client FROM 1 FOR 2 ) IN ( 'f1', 'f3' ) ),
+  client TEXT UNIQUE NOT NULL,
+  non_activated_datacap BIGINT
+);
 
 CREATE TABLE IF NOT EXISTS discover.providers (
   provider TEXT NOT NULL UNIQUE CONSTRAINT valid_provider_id CHECK ( SUBSTRING( provider FROM 1 FOR 2 ) = 'f0' ),
   active BOOL NOT NULL DEFAULT false,
   entry_created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   entry_last_updated TIMESTAMP WITH TIME ZONE NOT NULL,
-  details JSONB
+  meta JSONB
 );
 CREATE TRIGGER trigger_provider_insert
   BEFORE INSERT ON discover.providers
@@ -42,17 +47,26 @@ CREATE TRIGGER trigger_provider_insert
   EXECUTE PROCEDURE discover.update_entry_timestamp()
 ;
 CREATE TRIGGER trigger_provider_updated
-  BEFORE UPDATE OF details, active ON discover.providers
+  BEFORE UPDATE OF meta, active ON discover.providers
   FOR EACH ROW
   WHEN (OLD IS DISTINCT FROM NEW)
   EXECUTE PROCEDURE discover.update_entry_timestamp()
 ;
 
+
+CREATE TABLE IF NOT EXISTS discover.requests (
+  request_uuid UUID UNIQUE NOT NULL DEFAULT gen_random_uuid(),
+  entry_created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  provider TEXT NOT NULL REFERENCES discover.providers ( provider ),
+  request_dump JSONB NOT NULL,
+  meta JSONB
+);
+
+
 CREATE TABLE IF NOT EXISTS discover.dataset_groups (
   dataset_group_id SMALLINT NOT NULL UNIQUE,
   label TEXT NOT NULL UNIQUE
 );
-
 
 CREATE TABLE IF NOT EXISTS discover.car_files (
   piece_cid TEXT NOT NULL UNIQUE CONSTRAINT valid_piece_cid CHECK ( discover.valid_cid_v1(piece_cid) ),
@@ -66,13 +80,27 @@ CREATE INDEX IF NOT EXISTS car_files_dataset_group_idx ON discover.car_files ( d
 CREATE INDEX IF NOT EXISTS car_files_pending_key ON discover.car_files ( (meta->>'dynamo_root'), (meta->>'payload_size') ) WHERE ( root_cid IS NULL AND meta->>'stable_key' = 'true' );
 
 
+CREATE TABLE IF NOT EXISTS discover.drives (
+  drive_serno TEXT NOT NULL UNIQUE,
+  provider TEXT REFERENCES discover.providers ( provider ),
+  meta JSONB
+);
+CREATE INDEX IF NOT EXISTS drives_provider ON discover.drives ( provider );
+
+CREATE TABLE IF NOT EXISTS discover.original_drives (
+  drive_serno TEXT NOT NULL UNIQUE,
+  meta JSONB
+);
+
+
 CREATE TABLE IF NOT EXISTS discover.manifests (
   manifest_id TEXT NOT NULL UNIQUE,
-  drive_id TEXT,
+  drive_serno TEXT REFERENCES discover.drives ( drive_serno ),
   validated_at TIMESTAMP WITH TIME ZONE NOT NULL,
-  uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL
+  uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  meta JSONB
 );
-CREATE INDEX IF NOT EXISTS manifests_drive_id ON discover.manifests ( drive_id );
+CREATE INDEX IF NOT EXISTS manifests_drive_serno ON discover.manifests ( drive_serno );
 
 CREATE TABLE IF NOT EXISTS discover.manifest_entries (
   manifest_id TEXT NOT NULL REFERENCES discover.manifests ( manifest_id ),
@@ -82,6 +110,28 @@ CREATE TABLE IF NOT EXISTS discover.manifest_entries (
   CONSTRAINT singleton_path_record UNIQUE ( manifest_id, local_path ),
   CONSTRAINT singleton_cid_record UNIQUE ( claimed_root_cid, manifest_id )
 );
+
+CREATE TABLE IF NOT EXISTS discover.proposals (
+  manifest_id TEXT NOT NULL REFERENCES discover.manifests ( manifest_id ),
+  client TEXT NOT NULL REFERENCES discover.clients ( client ),
+  provider TEXT NOT NULL REFERENCES discover.providers ( provider ),
+  piece_cid TEXT NOT NULL REFERENCES discover.car_files ( piece_cid ),
+
+  dealstart_payload JSONB,
+  start_time TIMESTAMP WITH TIME ZONE GENERATED ALWAYS AS ( TO_TIMESTAMP( (dealstart_payload->>'DealStartEpoch')::INTEGER * 30 + 1598306400 ) ) STORED,
+
+  proposal_success_cid TEXT UNIQUE CONSTRAINT valid_proposal_cid CHECK ( discover.valid_cid_v1(proposal_success_cid) ),
+  proposal_failure TEXT NOT NULL DEFAULT '',
+
+  active_deal_id BIGINT REFERENCES discover.published_deals ( deal_id ),
+  meta JSONB,
+
+  entry_created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  CONSTRAINT singleton_piece_record UNIQUE ( provider, piece_cid, proposal_failure ),
+  CONSTRAINT proposal_no_fail_while_proposed CHECK ( NOT ( proposal_success_cid IS NOT NULL AND proposal_failure != '' AND start_time > NOW()) ),
+  CONSTRAINT proposal_no_fail_on_deal CHECK ( NOT ( active_deal_id IS NOT NULL AND proposal_failure != '' ) )
+);
+CREATE INDEX IF NOT EXISTS proposals_client_idx ON discover.proposals ( client );
 
 
 CREATE TABLE IF NOT EXISTS discover.published_deals (

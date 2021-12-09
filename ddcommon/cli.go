@@ -3,6 +3,7 @@ package ddcommon
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -23,8 +24,10 @@ var IsTerm = isatty.IsTerminal(os.Stderr.Fd())
 
 // singletons populated on start
 var (
-	LotusAPI *lotusapi.FullNodeStruct
-	Db       *pgxpool.Pool
+	LotusAPI            *lotusapi.FullNodeStruct
+	Db                  *pgxpool.Pool
+	lotusLookbackEpochs uint
+
 	PromURL  string
 	PromUser string
 	PromPass string
@@ -39,6 +42,10 @@ var CliFlags = []cli.Flag{
 		Name:  "lotus-api",
 		Value: "http://localhost:1234",
 	}),
+	altsrc.NewStringFlag(&cli.StringFlag{
+		Name:        "lotus-api-token",
+		DefaultText: "  {{ private, read from config file }}  ",
+	}),
 	&cli.UintFlag{
 		Name:  "lotus-lookback-epochs",
 		Value: FilDefaultLookback,
@@ -46,6 +53,7 @@ var CliFlags = []cli.Flag{
 			FilDefaultLookback,
 			filactors.EpochDurationSeconds*FilDefaultLookback,
 		),
+		Destination: &lotusLookbackEpochs,
 	},
 	altsrc.NewStringFlag(&cli.StringFlag{
 		Name:  "discover-pg-connstring",
@@ -132,7 +140,13 @@ func CliBeforeSetup(cctx *cli.Context) error {
 	}
 
 	api := new(lotusapi.FullNodeStruct)
-	apiCloser, err := jsonrpc.NewMergeClient(cctx.Context, cctx.String("lotus-api")+"/rpc/v0", "Filecoin", []interface{}{&api.Internal, &api.CommonStruct.Internal}, nil)
+	apiCloser, err := jsonrpc.NewMergeClient(
+		cctx.Context,
+		cctx.String("lotus-api")+"/rpc/v0",
+		"Filecoin",
+		[]interface{}{&api.Internal, &api.CommonStruct.Internal},
+		http.Header{"Authorization": []string{"Bearer " + cctx.String("lotus-api-token")}},
+	)
 	if err != nil {
 		return err
 	}

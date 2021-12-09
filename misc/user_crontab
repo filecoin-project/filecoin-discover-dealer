@@ -11,3 +11,4 @@ GOLOG_LOG_FMT=json
 # If another process is running, the lock is silently observed without logging anything
 */5 * * * * $HOME/filecoin-discover-dealer/misc/log_and_run.bash cron_track-deals.log.ndjson      $HOME/filecoin-discover-dealer/bin/dd-cron track-deals
 * * * * *   $HOME/filecoin-discover-dealer/misc/log_and_run.bash cron_poll-manifests.log.ndjson   $HOME/filecoin-discover-dealer/bin/dd-cron poll-manifests
+* * * * *   $HOME/filecoin-discover-dealer/misc/log_and_run.bash cron_propose-pending.log.ndjson  $HOME/filecoin-discover-dealer/bin/dd-cron propose-pending
