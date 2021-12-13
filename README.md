@@ -5,7 +5,7 @@ filecoin-discover-dealer
 
 This describes the onboarding cycle for folks who have purchased Filecoin Discover drives a while ago.
 
-0. Have the drive(s) accessible to the StorageMarkets node ( either via direct mount, or via `NFS`, or something similar ), and have the [DiscoverDrive Manifest ID](https://filecoinproject.slack.com/archives/C012W57151A/p1604697254095000) you obtained during the [validation stage](https://github.com/filecoin-project/filecoin-discover-validator) handy. If you can not locate your ManifestID (looks something like `1jbR165woaoEcEprg9cLD09TcaRL`), you can always re-run the validator tool again.
+0. Have the drive(s) accessible to the StorageMarkets node ( either via direct mount, or via `NFS`, or something similar ), and have the [DiscoverDrive Manifest ID](https://filecoinproject.slack.com/archives/C012W57151A/p1604697254095000) you obtained during the [validation stage](https://github.com/filecoin-project/filecoin-discover-validator) handy. If you can not locate your ManifestID (looks something like `1jbR165woaoEcEprg9cLD09TcaRL`), you can always re-run the validator tool again. Also remember that the majority of Filecoin Discover deals are sized at 1GiB with **some as small as 512MiB**: make sure to set your deal-acceptance criteria accordingly.
 
 1. Download the [SP Self-Identification Script](https://raw.githubusercontent.com/filecoin-project/filecoin-discover-dealer/master/misc/fil-spid.bash), and make it executable `chmod 755 fil-spid.bash`
 
