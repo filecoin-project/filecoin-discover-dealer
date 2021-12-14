@@ -36,7 +36,8 @@ BIN_jq="/usr/bin/jq"
 
 # derive API_INFO from implied defaults if necessary
 LOTUS_PATH="${LOTUS_PATH:-$HOME/.lotus}"
-FULLNODE_API_INFO="${FULLNODE_API_INFO:-$( "$BIN_cat" "$LOTUS_PATH/token" ):/ip4/127.0.0.1/tcp/1234/http}"
+LOTUS_CFG_MADDR="$( "$BIN_cat" "$LOTUS_PATH/api" 2>/dev/null || true )"
+FULLNODE_API_INFO="${FULLNODE_API_INFO:-$( "$BIN_cat" "$LOTUS_PATH/token" ):${LOTUS_CFG_MADDR:-/ip4/127.0.0.1/tcp/1234/http}}"
 
 # derive token + maddr, then host/port
 IFS=':' read -r API_TOKEN API_MADDR <<<"$FULLNODE_API_INFO"
