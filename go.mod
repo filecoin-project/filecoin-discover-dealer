@@ -9,7 +9,7 @@ require (
 	github.com/dgraph-io/ristretto v0.1.0
 	github.com/dustin/go-humanize v1.0.0
 	github.com/filecoin-project/go-address v0.0.6
-	github.com/filecoin-project/go-fil-markets v1.13.4
+	github.com/filecoin-project/go-fil-markets v1.13.4 // indirect
 	github.com/filecoin-project/go-jsonrpc v0.1.5
 	github.com/filecoin-project/go-state-types v0.1.1
 	github.com/filecoin-project/lotus v1.13.1
@@ -19,7 +19,7 @@ require (
 	github.com/ipfs/go-fs-lock v0.0.7
 	github.com/ipfs/go-log/v2 v2.4.0
 	github.com/jackc/pgx/v4 v4.14.1
-	github.com/labstack/echo/v4 v4.6.1
+	github.com/labstack/echo/v4 v4.9.0
 	github.com/labstack/gommon v0.3.1
 	github.com/mattn/go-isatty v0.0.14
 	github.com/prometheus/client_golang v1.11.0
